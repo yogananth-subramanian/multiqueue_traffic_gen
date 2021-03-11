@@ -246,7 +246,7 @@ def gen_stf_yaml(imix_table,b,pcap):
         tlst = b[str(indx)][i * m:(i + 1) * m]
         # print('iplist %s'%tlst)
         # print('newpps %s'%(imix_table[i]['pps']/len(tlst)))
-        npps = imix_table[i]['pps']/len(tlst)
+        npps = float(imix_table[i]['pps'])/len(tlst)
         for z in range(len(tlst)):
             # print(tlst[i])
             for j in range(len(pcap)):
@@ -313,7 +313,7 @@ def main():
         os.system(ifdown)
     cmdline='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "echo \'port config all rss all\nset fwd rxonly\nset verbose 1\nstart\'>/tmp/cmdline"'.format( user  = args.dut_user, host  = args.dut_host)
     os.system(cmdline)
-    testpmd='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "/root/dpdk-stable-19.11.6/build/app/testpmd  -l 0,1,2,3,4,5,6 --socket-mem 7168 -- -i --nb-cores=6   --rxq=2   --txq=2   --forward-mode=mac   --eth-peer=0,e4:43:4b:5c:97:c2   --eth-peer=1,e4:43:4b:5c:97:c3 --rxd=1024 --txd=1024 --cmdline-file=/root/cmd.txt 1>/tmp/testpmd.log"'.format( user  = args.dut_user, host  = args.dut_host)
+    testpmd='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "/root/dpdk-stable-19.11.6/build/app/testpmd  -l 0,1,2,3,4,5,6 --socket-mem 7168 -- -i --nb-cores=6   --rxq=2   --txq=2   --forward-mode=mac   --eth-peer=0,e4:43:4b:5c:97:c2   --eth-peer=1,e4:43:4b:5c:97:c3 --rxd=1024 --txd=1024 --cmdline-file=/tmp/cmdline 1>/tmp/testpmd.log"'.format( user  = args.dut_user, host  = args.dut_host)
     ps=subprocess.Popen(testpmd,shell=True) 
     sleep(5)
     fileList = glob.glob('/tmp/testpmd*.log')
@@ -347,7 +347,7 @@ def main():
     qratio=get_qjson()
     gen_traffic(qratio)
     for i in range(len(qratio)):
-      qratio[i]['pps']= 0.1 if 1-qratio[i]['pps'] == 0 else 1-qratio[i]['pps']
+      qratio[i]['pps']= 0.1 if 1-float(qratio[i]['pps']) == 0 else 1-float(qratio[i]['pps'])
     gen_traffic(qratio)
     ps.terminate()
     if stf_file == []:
@@ -448,7 +448,7 @@ if __name__ == '__main__':
         qratio=get_qjson()
         gen_traffic(qratio)
         for i in range(len(qratio)):
-          qratio[i]['pps']= 0.1 if 1-qratio[i]['pps'] == 0 else 1-qratio[i]['pps']
+          qratio[i]['pps']= 0.1 if 1-float(qratio[i]['pps']) == 0 else 1-float(qratio[i]['pps'])
         gen_traffic(qratio)
     if args.gen_learning != []:
         gen_learning()
