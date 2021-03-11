@@ -1,0 +1,42 @@
+---
+- name: debug
+  set_fact:
+    max: "{{ (fps < item[1]+10) | ternary(fps, item[1]+10) }}"
+- set_fact:
+    q_str: "{{ (q_str|default(''))+' '+(item|to_json) }}"
+  loop: "{{q_ratio}}"
+- set_fact:
+    nq_str: "{{ q_ratio|join(' ') }}"
+
+- copy: content="{{ q_ratio }}" dest=/tmp/input.json
+
+- name: Set Binary Search Command
+  set_fact:
+    traffic_cmd: >
+      {{ mq_bin }}
+      --ratio-file '/tmp/input.json'
+      --fps {{fps}} 
+      {% if  stf is defined -%}
+        --stf-path {{item[0]}}
+      {%- endif %}
+      --interfaces {{dpdk_nics.split(',')[0]}} {{dpdk_nics.split(',')[1]}}
+      --gen-learning {{item[1]}} {{max}}
+- name: Run Binary Search Script
+  shell: "{{ traffic_cmd }}"
+  register: perf_output
+- debug:
+    var: perf_output
+- name: debug
+  debug:
+    msg: "run {{item[0]}}{{item[1]}}" 
+- name: copy
+  vars:
+    dst_f: "{{ (stf is defined)|ternary('testpmd','/tmp/testpmd') }}"
+  copy:
+    src: "/tmp/testpmd.log"
+    dest: "/tmp/testpmd{{item[0]|basename}}{{item[1]}}.log"
+    remote_src: yes
+  delegate_to: "{{ groups['dpdk_dut'][0] }}"
+- name: debug
+  debug:
+    msg: "run {{item[0]}}{{item[1]}}" 

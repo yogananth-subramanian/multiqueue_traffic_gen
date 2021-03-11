@@ -1,0 +1,85 @@
+---
+- debug:
+    var: groups['dut_group'] | first
+
+- package:
+    name: python3
+    state: present
+
+- pip:
+    name: PyYAML
+    executable: pip3
+
+- copy:
+    src: "v2.88.tar.gz"
+    dest: "/tmp/" 
+
+- name: Run t-rex Traffic Generator In Dettached Tmux Session
+  vars:
+    trex_version: 'v2.88'
+    trex_dir: '/opt/trex/'
+  shell: |
+    mkdir -p {{ trex_dir }}
+    tar zxf /tmp/{{ trex_version }}.tar.gz -C {{ trex_dir }}
+    rm -f {{ trex_dir }}/current
+    ln -sf {{ trex_dir }}/{{ trex_version }} {{ trex_dir }}/current
+    tar xf {{ trex_dir }}/current/trex_client_*.tar.gz -C {{ trex_dir }}/current/
+
+- copy:
+    src: "mq.py"
+    dest: "/opt/trex/current/"
+
+- file: dest="/opt/trex/current/mq.py" mode=a+x
+
+- command: "python {{ symlinked_trex_dir }}/dpdk_setup_ports.py --no-prompt --force-macs -o /etc/trex_cfg.yaml -c {{dpdk_nics.split(',')[0]}} {{dpdk_nics.split(',')[1]}}"
+
+- slurp:
+    path: "/etc/trex_cfg.yaml"
+  register: cfg_path
+
+- set_fact:
+    cfg_data: "{{cfg_path['content']| b64decode | from_yaml }}"
+
+- debug:
+    msg: "{{cfg_data[0]['port_info'][0]['dest_mac']}} {{trex_port_info[0]['dest_mac']}}"
+
+- set_fact:
+    cfg_data: "{{cfg_data|combine({'port_info':trex_port_info}, recursive=True) }}"
+
+- name: Write back to a file
+  copy:
+    content: '{{ [cfg_data] | to_nice_yaml }}'
+    dest: /etc/trex_cfg.yaml
+
+- block:
+  - copy:
+      src:  "{{stf}}"
+      dest: "/tmp/"
+
+  - set_fact:
+      stf_lst: "{{ lookup('fileglob', stf+'*').split(',') }}"
+
+  - name: new list
+    vars:
+      nstf_lst: []
+    set_fact:
+      nstf_lst: "{{nstf_lst+['/tmp/'+item|basename]}}"
+    loop: "{{stf_lst}}"
+  when:
+    stf is defined
+
+- set_fact:
+    nstf_lst: ['']
+  when:
+    stf is undefined
+
+- include_tasks: tstpmdlog.yml
+  with_nested:
+    -  "{{ nstf_lst }}"
+    -  "{{ range(0, fps, 10)|list }}"
+
+- debug:
+    msg: "{{item[0]}}{{item[1] }}"
+  with_nested:
+    -  ['']
+    -  "{{ range(0, fps, 10)|list }}"

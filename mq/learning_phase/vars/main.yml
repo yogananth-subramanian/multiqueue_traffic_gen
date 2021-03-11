@@ -1,0 +1,16 @@
+dpdk_nics: "{{hostvars[groups['undercloud'][0]]['trex_nic']}}"
+trafficgen_dir: '/opt/trex/current'
+dpdk_root_dir: '/root/dpdk'
+symlinked_trex_dir: '/opt/trex/current'
+symlinked_trex_bin: '{{ symlinked_trex_dir }}/t-rex-64'
+trex_vlans: "{{hostvars[groups['undercloud'][0]]['nic_vlan']}}"
+mq_bin: "{{ trafficgen_dir }}/mq.py"
+trex_port_info: "{{hostvars[groups['undercloud'][0]]['trex_port_info']}}"
+fps: 20
+q_ratio:
+  - q: 0
+    pps: 10
+    isg: 0
+  - q: 1
+    pps: 5
+    isg: 0

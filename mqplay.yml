@@ -1,0 +1,378 @@
+---
+
+- hosts: undercloud
+  gather_facts: False
+  pre_tasks:
+    - name: Require Resource Method
+      fail:
+        msg: "cloud_resources is not set to correct values: 'create' or 'external', please refer to documentation"
+      when: cloud_resources is not defined or cloud_resources not in ['create', 'external']
+
+    - block:
+        - name: Generate Resources
+          import_role:
+            name: roles/post_install/openstack_tasks
+
+        # Workaround for adding generated instances to dynamic inventory
+        - meta: refresh_inventory
+
+        - name: Map Instances To Helper Variable
+          set_fact:
+            generated_instances: >-
+              {{ generated_instances | default([]) }} + [{'name': '{{ item['name'] }}',
+              'group': '{{ item['groups'] }}',
+              'user': '{{ connection_user }}',
+              'ssh_key': '/tmp/{{ item['key_name'] }}.key' }]
+          loop: "{{ instances }}"
+
+        - name: Workaround - Add Generated Instances To Dynamic Inventory
+          include_role:
+            name: roles/post_install/dynamic_host_inventory
+          vars:
+            discover_instance_external_ip: True
+          loop: "{{ generated_instances }}"
+      when: cloud_resources == 'create'
+
+    - name: gather facts from db servers
+      setup:
+      delegate_to: "{{groups['dpdk_dut']| first}}"
+      delegate_facts: True
+
+    - name: gather facts from db servers
+      setup:
+      delegate_to: "{{groups['trex']| first}}"
+      delegate_facts: True
+
+    - name: Gather Instance Server Ports
+      vars:
+        ansible_python_interpreter: "{{venv_path}}/bin/python"
+      os_networks_facts:
+        cloud: "{{ query_cloud }}"
+        validate_certs: "{{ cloud_validate_certs }}"
+
+    - set_fact:
+        net_map: "{{net_map|default({})| combine({item['provider:segmentation_id']: item['subnets'][0]})}}"
+      loop: "{{openstack_networks}}"
+      when:
+        - item['provider:segmentation_id']
+        - item['provider:segmentation_id'] in [502, 506]
+
+    - name: Gather Instance Server Ports
+      vars:
+        ansible_python_interpreter: "{{venv_path}}/bin/python"
+      os_subnets_facts:
+        cloud: "{{ query_cloud }}"
+        validate_certs: "{{ cloud_validate_certs }}"
+
+    - name: Show openstack subnets
+      set_fact:
+        subnet_map: "{{subnet_map|default({})| combine({item['id']: item['allocation_pools'][0]['start']})}}"
+      loop: "{{openstack_subnets}}"
+      when:
+        - item['id'] in net_map.values()
+
+    - set_fact:
+        nnet_map: "{{nnet_map|default({})| combine({item.key: subnet_map[item.value]})}}"
+      loop: "{{net_map| dict2items}}"
+
+    - debug:
+        msg:  "{{nnet_map|dictsort(false, 'value')}}"
+
+    - name: Reset Variables
+      set_fact:
+        instance_nics: []
+        instance_helper_nic_mac_addresses: []
+
+    - name: Query Trex Server Ports
+      import_role:
+        name: roles/post_install/discover_instance_ports
+      vars:
+        query_instance: "{{ 'testpmd' }}"
+
+    - name: Gather Instance Server Ports
+      vars:
+        ansible_python_interpreter: "{{venv_path}}/bin/python"
+      os_port_facts:
+        cloud: "{{ query_cloud }}"
+        validate_certs: "{{ cloud_validate_certs }}"
+        filters:
+          mac_address: "{{ inner_item }}"
+      loop: "{{ instance_helper_nic_mac_addresses | flatten(levels=1) }}"
+      failed_when: openstack_ports == []
+      register: instance_ports
+      loop_control:
+        loop_var: inner_item
+
+    - name: Parse Floating IP Attribute From APIs
+      set_fact:
+        instance_external_ip: "{{ openstack_servers[0]['addresses'][inner_item] | selectattr('OS-EXT-IPS:type', 'equalto', 'floating') | map(attribute='OS-EXT-IPS-MAC:mac_addr') | list | first }}"
+      loop: "{{ openstack_servers[0]['addresses'] | flatten(levels=1) }}"
+      when: openstack_servers[0]['addresses'][inner_item] | selectattr('OS-EXT-IPS:type', 'equalto', 'floating') | list != []
+      loop_control:
+        loop_var: inner_item
+
+    - name: Parse Instance Server NICs' MAC Addresses
+      set_fact:
+        instance_helper_nic_mac_addresses: "{{ instance_helper_nic_mac_addresses }} + [ '{{ openstack_servers[0]['addresses'][inner_item][0]['OS-EXT-IPS-MAC:mac_addr'] }}' ]"
+      loop: "{{ openstack_servers[0]['addresses'] | flatten(levels=1) }}"
+      when: instance_external_ip != openstack_servers[0]['addresses'][inner_item][0]['OS-EXT-IPS-MAC:mac_addr']
+      loop_control:
+        loop_var: inner_item
+
+    - set_fact:
+        dnic_map: "{{ dnic_map|default({})| combine({hostvars[groups['dpdk_dut']| first]['ansible_facts'][item]['macaddress']: item}) }}"
+      loop: "{{ hostvars[groups['dpdk_dut']| first]['ansible_interfaces'] | difference(['lo'])  }}"
+      when:
+        - hostvars[groups['dpdk_dut']| first]['ansible_facts'][item]['macaddress'] is defined
+
+    - name: Parse Floating IP Attribute From APIs
+      set_fact:
+        dut_mac_ip: "{{ dut_mac_ip|default({})|combine({openstack_servers[0]['addresses'][inner_item][0]['OS-EXT-IPS-MAC:mac_addr']: openstack_servers[0]['addresses'][inner_item][0]['addr']}) }}"
+      loop: "{{ openstack_servers[0]['addresses'] | flatten(levels=1) }}"
+      when: 
+        - openstack_servers[0]['addresses'][inner_item][0]['OS-EXT-IPS-MAC:mac_addr'] in instance_helper_nic_mac_addresses|difference(instance_external_ip)
+      loop_control:
+        loop_var: inner_item    
+
+    - set_fact:
+        dut_nic_lst:  "{{dut_nic_lst|default([])+[dnic_map[item[0]|string]]}}"
+      loop: "{{dut_mac_ip|dictsort(false, 'value')}}" 
+
+    - set_fact:
+        dut_nic:  "{{dut_nic_lst|join(',')}}"
+
+    - set_fact:
+        dut_mac_lst:  "{{dut_mac_lst|default([])+[item[0]]}}"
+      loop: "{{dut_mac_ip|dictsort(false, 'value')}}"
+
+    - set_fact:
+        dut_mac:  "{{dut_mac_lst|join(',')}}"
+
+    - name: Reset Variables
+      set_fact:
+        instance_nics: []
+        instance_helper_nic_mac_addresses: []
+
+    - name: Query Trex Server Ports
+      import_role:
+        name: roles/post_install/discover_instance_ports
+      vars:
+        query_instance: "{{ 'trex' }}"
+
+    - name: Gather Instance Server Ports
+      vars:
+        ansible_python_interpreter: "{{venv_path}}/bin/python"
+      os_port_facts:
+        cloud: "{{ query_cloud }}"
+        validate_certs: "{{ cloud_validate_certs }}"
+        filters:
+          mac_address: "{{ inner_item }}"
+      loop: "{{ instance_helper_nic_mac_addresses | flatten(levels=1) }}"
+      failed_when: openstack_ports == []
+      register: instance_ports
+      loop_control:
+        loop_var: inner_item
+
+    - name: Parse Floating IP Attribute From APIs
+      set_fact:
+        instance_external_ip: "{{ openstack_servers[0]['addresses'][inner_item] | selectattr('OS-EXT-IPS:type', 'equalto', 'floating') | map(attribute='OS-EXT-IPS-MAC:mac_addr') | list | first }}"
+      loop: "{{ openstack_servers[0]['addresses'] | flatten(levels=1) }}"
+      when: openstack_servers[0]['addresses'][inner_item] | selectattr('OS-EXT-IPS:type', 'equalto', 'floating') | list != []
+      loop_control:
+        loop_var: inner_item
+
+    - name: Parse Instance Server NICs' MAC Addresses
+      set_fact:
+        instance_helper_nic_mac_addresses: "{{ instance_helper_nic_mac_addresses }} + [ '{{ openstack_servers[0]['addresses'][inner_item][0]['OS-EXT-IPS-MAC:mac_addr'] }}' ]"
+      loop: "{{ openstack_servers[0]['addresses'] | flatten(levels=1) }}"
+      when: instance_external_ip != openstack_servers[0]['addresses'][inner_item][0]['OS-EXT-IPS-MAC:mac_addr']
+      loop_control:
+        loop_var: inner_item
+
+    - set_fact:
+        tnic_map: "{{ tnic_map|default({})| combine({hostvars[groups['trex']| first]['ansible_facts'][item]['macaddress']: item}) }}"
+      loop: "{{ hostvars[groups['trex']| first]['ansible_interfaces'] | difference(['lo'])  }}"
+      when:
+        - hostvars[groups['trex']| first]['ansible_facts'][item]['macaddress'] is defined
+
+    - name: Parse Floating IP Attribute From APIs
+      set_fact:
+        trex_mac_ip: "{{ trex_mac_ip|default({})|combine({openstack_servers[0]['addresses'][inner_item][0]['OS-EXT-IPS-MAC:mac_addr']: openstack_servers[0]['addresses'][inner_item][0]['addr']}) }}"
+      loop: "{{ openstack_servers[0]['addresses'] | flatten(levels=1) }}"
+      when:
+        - openstack_servers[0]['addresses'][inner_item][0]['OS-EXT-IPS-MAC:mac_addr'] in instance_helper_nic_mac_addresses|difference(instance_external_ip)
+      loop_control:
+        loop_var: inner_item
+
+    - set_fact:
+        trex_nic_lst:  "{{trex_nic_lst|default([])+[tnic_map[item[0]|string]]}}"
+      loop: "{{trex_mac_ip|dictsort(false, 'value')}}"
+
+    - set_fact:
+        trex_nic:  "{{trex_nic_lst|join(',')}}"
+
+    - set_fact:
+        trex_mac_lst:  "{{trex_mac_lst|default([])+[item[0]]}}"
+      loop: "{{trex_mac_ip|dictsort(false, 'value')}}"
+
+    - set_fact:
+        trex_mac:  "{{trex_mac_lst|join(',')}}"
+
+    - set_fact:
+        nic_vlan_lst:  "{{nic_vlan_lst|default([])+[item[0]|string]}}"
+      loop: "{{nnet_map|dictsort(false, 'value')}}"
+
+    - set_fact:
+        nic_vlan:  "{{nic_vlan_lst|join(',')}}"
+
+    - set_fact:
+        trex_port_info:  "{{trex_port_info|default([])+[{'src_mac':trex_mac_lst[item],'dest_mac':dut_mac_lst[item]}]}}"
+      loop: "{{range(0, 2)|list}}"
+
+    - name: gather facts from db servers
+      setup:
+      delegate_to: "{{groups['trex']| first}}"
+      delegate_facts: True
+
+
+    - name: gather facts from db servers
+      setup:
+      delegate_to: "{{groups['dpdk_dut']| first}}"
+      delegate_facts: True
+
+- hosts: "{{ dut_compute }}"
+  become: true
+  roles:
+    - role: roles/packet_gen/trex/compute_tuning
+  tasks:
+    - set_fact:
+        multiqueue: 1
+
+- hosts: "{{ groups['dpdk_dut'][0] }}"
+  vars:
+    dpdk_root_dir: "/root/dpdk"
+    dpdk_compiled_dir: '{{ dpdk_root_dir }}/build/app'
+    trex_macs: "{{hostvars[groups['undercloud'][0]]['trex_mac']}}"
+    testpmd_bin: "{{ dpdk_compiled_dir }}/testpmd"
+    testpmd_lcores: '0,1,2,3,4,5,6'
+    testpmd_mem_channels: 2
+    testpmd_socket_mem: 7168
+    testpmd_forward_cores: 6
+    testpmd_rxd: 1024
+    testpmd_txd: 1024
+    testpmd_rxq: "{{hostvars[dut_compute]['multiqueue']}}"
+    testpmd_txq: "{{hostvars[dut_compute]['multiqueue']}}"
+    forward_mode: io
+    testpmd_cmd: |
+        {{ testpmd_bin }} -l {{ testpmd_lcores }} \
+        -n {{ testpmd_mem_channels}} \
+        --socket-mem {{ testpmd_socket_mem }} -- -i \
+        --nb-cores={{ testpmd_forward_cores }} \
+        --forward-mode=rxonly \
+        --eth-peer=0,{{ trex_macs.split(',')[0] }} \
+        --eth-peer=1,{{ trex_macs.split(',')[1] }} \
+        --rxd={{ testpmd_rxd }} \
+        --txd={{ testpmd_txd }} \
+        --rxq={{ testpmd_rxq }} \
+        --txq={{ testpmd_txq }} \
+        --cmdline-file=/tmp/cmdline &>/tmp/testpmd.log
+  roles:
+    - role: ansible-nfv/roles/packet_gen/trex/bind_dpdk_nics
+      vars:
+        discover_dut_macs: True
+        dpdk_binding_driver: "{{ dut_dpdk_binding_driver | default('vfio-pci') }}"
+      when: bind_dpdk_nics | default(True)
+
+    - role: ansible-nfv/roles/packet_gen/trex/launch_testpmd
+      when: launch_testpmd | default(True)
+
+- hosts: "{{groups['trex'][0]}}"
+  become: true
+  roles:
+    - role: mq/learning_phase
+
+
+- hosts: "{{ groups['dpdk_dut'][0] }}"
+  vars:
+    fps: 20
+  tasks:
+  - name: fetch
+    vars:
+      src_f: "{{ (stf is defined)|ternary('','/tmp/testpmd') }}"
+    fetch:
+      src: "/tmp/testpmd{{item[0]|basename}}{{item[1]}}.log"
+      dest: "/tmp/"
+      flat: yes
+    with_nested:
+      -  "{{hostvars[groups['trex'][0]]['nstf_lst'] }}"
+      -  "{{ range(0, fps, 10)|list }}"
+
+  - name: Check If Tmux Sessions Are Running
+    shell: "tmux list-sessions -F '#S'"
+    register: tmux_sessions
+    failed_when: False
+
+  - name: Kill Tmux Sessions
+    shell: "tmux list-sessions -F '#S' | xargs -n1 tmux kill-session -t"
+    when: tmux_sessions['stdout_lines'] != []
+
+- hosts: "{{groups['trex'][0]}}"
+  vars:
+    fps: 20
+  tasks:
+  - name: copy
+    vars:
+      src_f: "{{ (stf is defined)|ternary('','/tmp/testpmd') }}"
+    copy:
+      src: "/tmp/testpmd{{item[0]|basename}}{{item[1]}}.log"
+      dest: "/tmp/"
+    with_nested:
+      -  "{{ nstf_lst }}"
+      -  "{{ range(0, fps, 10)|list }}"
+
+- hosts: "{{ groups['dpdk_dut'][0] }}"
+  vars:
+    dpdk_root_dir: "/root/dpdk"
+    dpdk_compiled_dir: '{{ dpdk_root_dir }}/build/app'
+    trex_macs: "{{hostvars[groups['undercloud'][0]]['trex_mac']}}"
+    testpmd_bin: "{{ dpdk_compiled_dir }}/testpmd"
+    testpmd_lcores: '0,1,2,3,4,5,6'
+    testpmd_mem_channels: 2
+    testpmd_socket_mem: 7168
+    testpmd_forward_cores: 6
+    testpmd_rxd: 1024
+    testpmd_txd: 1024
+    testpmd_rxq: "{{hostvars[dut_compute]['multiqueue']}}"
+    testpmd_txq: "{{hostvars[dut_compute]['multiqueue']}}"
+    forward_mode: io
+    testpmd_cmd: |
+        {{ testpmd_bin }} -l {{ testpmd_lcores }} \
+        -n {{ testpmd_mem_channels}} \
+        --socket-mem {{ testpmd_socket_mem }} -- -i \
+        -a --nb-cores={{ testpmd_forward_cores }} \
+        --forward-mode=macswap \
+        --eth-peer=0,{{ trex_macs.split(',')[0] }} \
+        --eth-peer=1,{{ trex_macs.split(',')[1] }} \
+        --rxd={{ testpmd_rxd }} \
+        --txd={{ testpmd_txd }} \
+        --rxq={{ testpmd_rxq }} \
+        --txq={{ testpmd_txq }} &>/tmp/testpmd.log
+  roles:
+    - role: ansible-nfv/roles/packet_gen/trex/launch_testpmd
+      when: launch_testpmd | default(True)
+
+- hosts: "{{groups['trex'][0]}}"
+  become: true
+  roles:
+    - role: ansible-nfv/roles/packet_gen/trex/bind_dpdk_nics
+      vars:
+        dpdk_binding_driver: "{{ dut_dpdk_binding_driver | default('vfio-pci') }}"
+      when: bind_dpdk_nics | default(True)
+
+    - role: ansible-nfv/roles/packet_gen/trex/launch_trex
+      when:
+        - stf is undefined
+        - launch_trex | default(True)
+
+    - role: mq/traffic_gen
+

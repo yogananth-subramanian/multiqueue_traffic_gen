@@ -1,0 +1,39 @@
+- debug:
+    msg: "works {{dpdk_nics.split(',')[0]}}"
+  when:
+    stf is undefined
+#- command: "python {{ symlinked_trex_dir }}/dpdk_nic_bind.py -b vfio-pci {{dpdk_nics.split(',')[0]}} {{dpdk_nics.split(',')[1]}}"
+
+#- include_role: 
+#    name: ansible-nfv/roles/packet_gen/trex
+#    tasks_from: launch_trex
+#  when:
+#    stf is undefined
+
+- command: "python {{ symlinked_trex_dir }}/trex_daemon_server start"
+  when:
+    stf is defined
+
+- name: Set Binary Search Command
+  set_fact:
+    traffic_cmd: >
+      {{ mq_bin }}
+      --ratio-file '/tmp/input.json'
+      --fps {{fps}}
+      {% if  stf is defined -%}
+        --stf-path /tmp/
+      {%- endif %}
+      --interfaces {{dpdk_nics.split(',')[0]}} {{dpdk_nics.split(',')[1]}}
+      --gen-traffic
+- name: Run Binary Search Script
+  shell: "{{ traffic_cmd }}"
+  register: perf_output
+
+
+- debug:
+    var: perf_output
+
+- command: "python {{ symlinked_trex_dir }}/trex_daemon_server stop"
+  when:
+    stf is defined
+
