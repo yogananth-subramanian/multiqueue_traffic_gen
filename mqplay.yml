@@ -224,10 +224,16 @@
 
     - set_fact:
         nic_vlan:  "{{nic_vlan_lst|join(',')}}"
-
+        
     - set_fact:
         trex_port_info:  "{{trex_port_info|default([])+[{'src_mac':trex_mac_lst[item],'dest_mac':dut_mac_lst[item]}]}}"
       loop: "{{range(0, 2)|list}}"
+      when: nic_vlan_lst == []
+
+    - set_fact:
+        trex_port_info:  "{{trex_port_info|default([])+[{'src_mac':trex_mac_lst[item],'dest_mac':dut_mac_lst[item],'vlan':nic_vlan_lst[item]}]}}"
+      loop: "{{range(0, 2)|list}}"
+      when: nic_vlan_lst != []
 
     - name: gather facts from db servers
       setup:
