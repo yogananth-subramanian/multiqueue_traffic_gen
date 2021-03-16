@@ -63,9 +63,12 @@ class STLImix(object):
     def mapping(self,testpmd_json):
                 with open(testpmd_json,'r') as js:
                         self.pkt_mapping=json.load(js)
-    def create_stream (self, pps, vm, src_mac, dst_mac, isg=0):
+    def create_stream (self, pps, vm, src_mac, dst_mac, vlan=None, isg=0):
         size = 60
-        base_pkt = Ether(src=src_mac,dst=dst_mac)/Dot1Q(vlan=405)/IP(src="16.0.0.1",dst="48.0.0.1")/UDP(dport=32768,sport=1025)
+        if vlan == None:
+            base_pkt = Ether(src=src_mac,dst=dst_mac)/IP(src="16.0.0.1",dst="48.0.0.1")/UDP(dport=32768,sport=1025)
+        else:
+            base_pkt = Ether(src=src_mac,dst=dst_mac)/Dot1Q(vlan=vlan)/IP(src="16.0.0.1",dst="48.0.0.1")/UDP(dport=32768,sport=1025)
         pad = max(0, size - len(base_pkt)) * 'x'
         pkt = STLPktBuilder(pkt = base_pkt/pad,
                             vm = vm)
@@ -74,7 +77,7 @@ class STLImix(object):
                          packet = pkt,
                          mode = STLTXCont(pps = pps))
 
-    def get_streams (self, src_mac, dst_mac, qratio = [{'q': 0, 'pps': 10, 'isg':0}], testpmd_json='/tmp/testpmd.json',direction = 0, **kwargs):
+    def get_streams (self, src_mac, dst_mac, vlan = None, qratio = [{'q': 0, 'pps': 10, 'isg':0}], testpmd_json='/tmp/testpmd.json',direction = 0, **kwargs):
         q = {}
         ql = {}
         #vm = [None] * len(STLImix.queue_ratio)
@@ -91,13 +94,13 @@ class STLImix(object):
           i=q[indx]-1
           srclst=self.pkt_mapping[str(indx)][i * m:(i + 1) * m]
           vm[i] = STLScVmRaw([
-              STLVmFlowVar(name = "src_ip", value_list=srclst, op="inc"),
-              STLVmWrFlowVar(fv_name='src_ip', pkt_offset= 'IP.src'),
+              STLVmFlowVar(name = "dst_ip", value_list=srclst, op="inc"),
+              STLVmWrFlowVar(fv_name='dst_ip', pkt_offset= 'IP.dst'),
               STLVmFixIpv4(offset = 'IP')
               ])
 
         print(vm)
-        return [self.create_stream( qratio[i]['pps'], vm[i], src_mac, dst_mac) for i in range(len(qratio))]
+        return [self.create_stream( qratio[i]['pps'], vm[i], src_mac, dst_mac, vlan) for i in range(len(qratio))]
 
 def register():
     return STLImix()
@@ -168,6 +171,8 @@ def trex_cfg():
         devices.append({'name':args.interfaces[i]})
         devices[i]['dest_mac']=cfg_dict[0]['port_info'][i]['dest_mac']
         devices[i]['src_mac']=cfg_dict[0]['port_info'][i]['src_mac']
+        if cfg_dict[0]['port_info'][i].get('vlan'):
+            devices[i]['vlan']=cfg_dict[0]['port_info'][i]['vlan']
     return devices
 
 def gen_scapy_pkt(maxpps, proto, start_seq=0, src_port=1025, dst_port=32768):
@@ -178,10 +183,15 @@ def gen_scapy_pkt(maxpps, proto, start_seq=0, src_port=1025, dst_port=32768):
     iter=0
     for i in range(start_seq, end_seq):
         print(str(ipaddress.IPv4Address(ip_start)+iter))
-        if proto == 'UDP':
-            pkt = Ether(src=devices[0]['src_mac'],dst=devices[0]['dest_mac'])/Dot1Q(vlan=405)/IP(dst=str(ipaddress.IPv4Address(ip_start)+iter),src="16.0.0.1")/UDP(dport=dst_port,sport=src_port)
+        if devices[0].get('vlan'):
+            pkt2 = Ether(src=devices[0]['src_mac'],dst=devices[0]['dest_mac'])/Dot1Q(vlan=int(devices[0]['vlan']))
         else:
-            pkt = Ether(src=devices[0]['src_mac'],dst=devices[0]['dest_mac'])/Dot1Q(vlan=405)/IP(dst=str(ipaddress.IPv4Address(ip_start)+iter),src="16.0.0.1")/TCP(dport=dst_port,sport=src_port)
+            pkt2 = Ether(src=devices[0]['src_mac'],dst=devices[0]['dest_mac'])
+        pkt1 = pkt2/IP(dst=str(ipaddress.IPv4Address(ip_start)+iter),src="16.0.0.1")    
+        if proto == 'UDP':
+            pkt = pkt1/UDP(dport=dst_port,sport=src_port)
+        else:
+            pkt = pkt1/TCP(dport=dst_port,sport=src_port)
         data = (max(0, size - len(pkt))+i) * 'x'
         sendp(pkt/data, iface=args.interfaces[0])
         iter=iter+1
@@ -268,11 +278,12 @@ def gen_stl(queue_ratio):
     c = STLClient(verbose_level="error")
     passed = True
     try:
+        devices=trex_cfg()
         c.connect()
         my_ports = [0, 1]
         c.reset(ports=my_ports)
         c.remove_all_streams(my_ports)
-        c.add_streams(register().get_streams('e4:43:4b:5c:97:c2','e4:43:4b:5c:96:72',testpmd_json='/tmp/testpmd.json',qratio=queue_ratio), ports = my_ports)
+        c.add_streams(register().get_streams(devices[0]['src_mac'],devices[0]['dest_mac'],devices[0].get('vlan'),testpmd_json='/tmp/testpmd.json',qratio=queue_ratio), ports = my_ports)
         c.start(ports = [0], mult = "100", duration = int(args.duration))
         c.wait_on_traffic(ports = [0, 1])
     except STLError as e:
@@ -293,6 +304,8 @@ def gen_stf():
     print("After Starting, TRex status is: %s %s", trex.is_running(),
           trex.get_running_status())
     time.sleep(int(args.duration))
+    while trex.is_running():
+        time.sleep(5)
     print("Is TRex running? %s %s", trex.is_running(),
           trex.get_running_status())
 
