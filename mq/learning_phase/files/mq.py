@@ -414,6 +414,7 @@ if __name__ == '__main__':
     parser.add_argument("--fps",  action='store')
     parser.add_argument("--dut-user", default='root', action='store')
     parser.add_argument("--dut-host", default=None, action='store')
+    parser.add_argument("--testpmd-path", default=None, action='store')
     parser.add_argument("--stf-path", default=None, action='store')
     parser.add_argument("--duration", default=30, action='store')
     parser.add_argument("--gen-traffic", action='store_true')
