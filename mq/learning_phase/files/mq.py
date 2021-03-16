@@ -319,6 +319,7 @@ def gen_pkt_copy_log(start_pkt,end,pcap_file):
 
 
 def main():
+    devices=trex_cfg()
     obj = dpdk_setup_ports.CIfMap(dpdk_setup_ports.map_driver.cfg_file);
     obj.do_return_to_linux()
     for i in  args.interfaces:
@@ -326,7 +327,7 @@ def main():
         os.system(ifdown)
     cmdline='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "echo \'port config all rss all\nset fwd rxonly\nset verbose 1\nstart\'>/tmp/cmdline"'.format( user  = args.dut_user, host  = args.dut_host)
     os.system(cmdline)
-    testpmd='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "/root/dpdk-stable-19.11.6/build/app/testpmd  -l 0,1,2,3,4,5,6 --socket-mem 7168 -- -i --nb-cores=6   --rxq=2   --txq=2   --forward-mode=mac   --eth-peer=0,e4:43:4b:5c:97:c2   --eth-peer=1,e4:43:4b:5c:97:c3 --rxd=1024 --txd=1024 --cmdline-file=/tmp/cmdline 1>/tmp/testpmd.log"'.format( user  = args.dut_user, host  = args.dut_host)
+    testpmd='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "{testpmd} -l 0,1,2,3,4,5,6 --socket-mem 7168 -- -i --nb-cores=6   --rxq=2   --txq=2   --forward-mode=mac   --eth-peer=0,{nic1} --eth-peer=1,{nic2} --rxd=1024 --txd=1024 --cmdline-file=/tmp/cmdline 1>/tmp/testpmd.log"'.format( user  = args.dut_user, host  = args.dut_host, testpmd =  args.testpmd_path, nic1 = devices[0]['src_mac'], nic2 = devices[1]['src_mac'])
     ps=subprocess.Popen(testpmd,shell=True) 
     sleep(5)
     fileList = glob.glob('/tmp/testpmd*.log')
@@ -348,7 +349,7 @@ def main():
     ps.terminate()
     cmd = '{ptn} dpdk_nic_bind.py -b vfio-pci eth1 eth2'.format( ptn = sys.executable)
     os.system(cmd)
-    testpmd='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "/root/dpdk-stable-19.11.6/build/app/testpmd  -l 0,1,2,3,4,5,6 --socket-mem 7168 -- -i -a  --nb-cores=6   --rxq=2   --txq=2   --forward-mode=macswap --eth-peer=0,e4:43:4b:5c:97:c2   --eth-peer=1,e4:43:4b:5c:97:c3 --rxd=1024 --txd=1024  1>/tmp/testpmd.log"'.format( user  = args.dut_user, host  = args.dut_host)
+    testpmd='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "{testpmd} -l 0,1,2,3,4,5,6 --socket-mem 7168 -- -i -a  --nb-cores=6   --rxq=2   --txq=2   --forward-mode=macswap --eth-peer=0,{nic1}   --eth-peer=1,{nic2} --rxd=1024 --txd=1024  1>/tmp/testpmd.log"'.format( user  = args.dut_user, host  = args.dut_host, testpmd =  args.testpmd_path, nic1 = devices[0]['src_mac'], nic2 = devices[1]['src_mac'])
     ps=subprocess.Popen(testpmd,shell=True) 
     if stf_file == []:
         outF = open('/tmp/trex.log', "w")
