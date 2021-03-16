@@ -100,7 +100,7 @@ class STLImix(object):
               ])
 
         print(vm)
-        return [self.create_stream( qratio[i]['pps'], vm[i], src_mac, dst_mac, vlan) for i in range(len(qratio))]
+        return [self.create_stream( float(qratio[i]['pps']), vm[i], src_mac, dst_mac, vlan) for i in range(len(qratio))]
 
 def register():
     return STLImix()
