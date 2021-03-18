@@ -1,7 +1,7 @@
 
 # multiqueue traffic generator
 
-mq.py traffic generator(based on trex) helps to evaluate multiqueue behaviour of the DUT by generating flow that are asymmetric, so that the queues on the DUT are asymmetrically loaded.
+mq.py traffic generator(based on trex) helps to evaluate multiqueue behaviour of the DUT by generating deterministic asymmetric flows, so that the queues on the DUT are asymmetrically loaded deterministically.
 It uses  2 phased approach for asymmetric traffic generation
 
 phase 1, learning, use scapy to generate the range of traffic,  collect and sort into queues
