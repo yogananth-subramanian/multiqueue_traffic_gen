@@ -64,18 +64,20 @@ class STLImix(object):
                 with open(testpmd_json,'r') as js:
                         self.pkt_mapping=json.load(js)
     def create_stream (self, pps, vm, src_mac, dst_mac, vlan=None, isg=0):
-        size = 60
+        print(vm)
+        print(pps)
+        size = 64
         if vlan == None:
-            base_pkt = Ether(src=src_mac,dst=dst_mac)/IP(src="16.0.0.1",dst="48.0.0.1")/UDP(dport=32768,sport=1025)
+          base_pkt = Ether(src=src_mac,dst=dst_mac)/IP(src="16.0.0.1",dst="48.0.0.1")/UDP(dport=32768,sport=1025)
         else:
-            base_pkt = Ether(src=src_mac,dst=dst_mac)/Dot1Q(vlan=vlan)/IP(src="16.0.0.1",dst="48.0.0.1")/UDP(dport=32768,sport=1025)
+          base_pkt = Ether(src=src_mac,dst=dst_mac)/Dot1Q(vlan=vlan)/IP(src="16.0.0.1",dst="48.0.0.1")/UDP(dport=32768,sport=1025)
         pad = max(0, size - len(base_pkt)) * 'x'
         pkt = STLPktBuilder(pkt = base_pkt/pad,
                             vm = vm)
 
         return STLStream(isg = isg,
                          packet = pkt,
-                         mode = STLTXCont(pps = pps))
+                         mode = STLTXCont(pps = pps*1000000*float(args.multiplier)))
 
     def get_streams (self, src_mac, dst_mac, vlan = None, qratio = [{'q': 0, 'pps': 10, 'isg':0}], testpmd_json='/tmp/testpmd.json',direction = 0, **kwargs):
         q = {}
@@ -91,14 +93,15 @@ class STLImix(object):
           q[indx]=q.get(indx,0)+1
           n=ql[indx]
           m=len(self.pkt_mapping[str(indx)])//ql[indx]
-          i=q[indx]-1
-          srclst=self.pkt_mapping[str(indx)][i * m:(i + 1) * m]
+          j=q[indx]-1
+          srclst=self.pkt_mapping[str(indx)][j * m:(j + 1) * m]
           vm[i] = STLScVmRaw([
               STLVmFlowVar(name = "dst_ip", value_list=srclst, op="inc"),
               STLVmWrFlowVar(fv_name='dst_ip', pkt_offset= 'IP.dst'),
               STLVmFixIpv4(offset = 'IP')
               ])
-
+          print(i)
+          print(vm[i])
         print(vm)
         return [self.create_stream( float(qratio[i]['pps']), vm[i], src_mac, dst_mac, vlan) for i in range(len(qratio))]
 
@@ -172,7 +175,7 @@ def trex_cfg():
         devices[i]['dest_mac']=cfg_dict[0]['port_info'][i]['dest_mac']
         devices[i]['src_mac']=cfg_dict[0]['port_info'][i]['src_mac']
         if cfg_dict[0]['port_info'][i].get('vlan'):
-            devices[i]['vlan']=cfg_dict[0]['port_info'][i]['vlan']
+          devices[i]['vlan']=cfg_dict[0]['port_info'][i]['vlan']
     return devices
 
 def gen_scapy_pkt(maxpps, proto, start_seq=0, src_port=1025, dst_port=32768):
@@ -187,7 +190,7 @@ def gen_scapy_pkt(maxpps, proto, start_seq=0, src_port=1025, dst_port=32768):
             pkt2 = Ether(src=devices[0]['src_mac'],dst=devices[0]['dest_mac'])/Dot1Q(vlan=int(devices[0]['vlan']))
         else:
             pkt2 = Ether(src=devices[0]['src_mac'],dst=devices[0]['dest_mac'])
-        pkt1 = pkt2/IP(dst=str(ipaddress.IPv4Address(ip_start)+iter),src="16.0.0.1")    
+        pkt1 = pkt2/IP(dst=str(ipaddress.IPv4Address(ip_start)+iter),src="16.0.0.1")
         if proto == 'UDP':
             pkt = pkt1/UDP(dport=dst_port,sport=src_port)
         else:
@@ -210,7 +213,7 @@ def parse_testpmd_log(mpps,pcap_file='',start=0):
             for ln in tp:
                 x = re.search('src='+src_mac.upper(), ln)
                 if x:
-                    y = re.search('RSS queue=0x\d+', ln)
+                    y = re.search('(Receive queue|RSS queue)=0x\d+', ln)
                     if y:
                         q[int(y.group().split('=')[1], 16)] = q.get(int(
                         y.group().split('=')[1], 16), [])+[int(
@@ -258,7 +261,7 @@ def gen_stf_yaml(imix_table,b,pcap):
         # print('newpps %s'%(imix_table[i]['pps']/len(tlst)))
         npps = float(imix_table[i]['pps'])/len(tlst)
         for z in range(len(tlst)):
-            # print(tlst[i])
+            #print(tlst[i])
             for j in range(len(pcap)):
                 # print(pcap[j])
                 # print('pps %s'%(npps/len(pcap)))
@@ -283,8 +286,9 @@ def gen_stl(queue_ratio):
         my_ports = [0, 1]
         c.reset(ports=my_ports)
         c.remove_all_streams(my_ports)
-        c.add_streams(register().get_streams(devices[0]['src_mac'],devices[0]['dest_mac'],devices[0].get('vlan'),testpmd_json='/tmp/testpmd.json',qratio=queue_ratio), ports = my_ports)
-        c.start(ports = [0], mult = "100", duration = int(args.duration))
+        c.add_streams(register().get_streams(devices[0]['src_mac'],devices[0]['dest_mac'],int(devices[0].get('vlan')),testpmd_json='/tmp/testpmd.json',qratio=queue_ratio), ports = [0])
+        #5000000
+        c.start(ports = [0], mult = "1", duration = int(args.duration))
         c.wait_on_traffic(ports = [0, 1])
     except STLError as e:
         passed = False
@@ -298,14 +302,14 @@ def gen_stf():
     print("Before Running, TRex status is: %s", trex.is_running())
     print("Before Running, TRex status is: %s",
           trex.get_running_status())
-    ret = trex.start_trex(c=1, m=1, d=int(args.duration), f='mydns_traffic.yaml',
+    ret = trex.start_trex(c=1, m=0.1, d=int(args.duration), f='mydns_traffic.yaml',
                           nc=True)
 
     print("After Starting, TRex status is: %s %s", trex.is_running(),
           trex.get_running_status())
     time.sleep(int(args.duration))
     while trex.is_running():
-        time.sleep(5)
+      time.sleep(5)
     print("Is TRex running? %s %s", trex.is_running(),
           trex.get_running_status())
 
@@ -327,7 +331,7 @@ def main():
         os.system(ifdown)
     cmdline='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "echo \'port config all rss all\nset fwd rxonly\nset verbose 1\nstart\'>/tmp/cmdline"'.format( user  = args.dut_user, host  = args.dut_host)
     os.system(cmdline)
-    testpmd='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "{testpmd} -l 0,1,2,3,4,5,6 --socket-mem 7168 -- -i --nb-cores=6   --rxq=2   --txq=2   --forward-mode=mac   --eth-peer=0,{nic1} --eth-peer=1,{nic2} --rxd=1024 --txd=1024 --cmdline-file=/tmp/cmdline 1>/tmp/testpmd.log"'.format( user  = args.dut_user, host  = args.dut_host, testpmd =  args.testpmd_path, nic1 = devices[0]['src_mac'], nic2 = devices[1]['src_mac'])
+    testpmd='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "{testpmd} -l 0,1,2,3,4,5,6 --socket-mem 7168 -- -i --nb-cores=6   --rxq={qnum}   --txq={qnum}  --forward-mode=mac   --eth-peer=0,{nic1}   --eth-peer=1,{nic2} --rxd=1024 --txd=1024 --cmdline-file=/tmp/cmdline 1>/tmp/testpmd.log"'.format( user  = args.dut_user, host  = args.dut_host, testpmd =  args.testpmd_path, nic1 = devices[0]['src_mac'], nic2 = devices[1]['src_mac'], qnum = args.q_num)
     ps=subprocess.Popen(testpmd,shell=True) 
     sleep(5)
     fileList = glob.glob('/tmp/testpmd*.log')
@@ -349,7 +353,7 @@ def main():
     ps.terminate()
     cmd = '{ptn} dpdk_nic_bind.py -b vfio-pci eth1 eth2'.format( ptn = sys.executable)
     os.system(cmd)
-    testpmd='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "{testpmd} -l 0,1,2,3,4,5,6 --socket-mem 7168 -- -i -a  --nb-cores=6   --rxq=2   --txq=2   --forward-mode=macswap --eth-peer=0,{nic1}   --eth-peer=1,{nic2} --rxd=1024 --txd=1024  1>/tmp/testpmd.log"'.format( user  = args.dut_user, host  = args.dut_host, testpmd =  args.testpmd_path, nic1 = devices[0]['src_mac'], nic2 = devices[1]['src_mac'])
+    testpmd='ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null {user}@{host} "{testpmd}  -l 0,1,2,3,4,5,6 --socket-mem 7168 -- -i -a  --nb-cores=6   --rxq={qnum}   --txq={qnum}   --forward-mode=macswap --eth-peer=0,{nic1}   --eth-peer=1,{nic2} --rxd=1024 --txd=1024  1>/tmp/testpmd.log"'.format( user  = args.dut_user, host  = args.dut_host, testpmd =  args.testpmd_path, nic1 = devices[0]['src_mac'], nic2 = devices[1]['src_mac'], qnum = args.q_num)
     ps=subprocess.Popen(testpmd,shell=True) 
     if stf_file == []:
         outF = open('/tmp/trex.log', "w")
@@ -415,8 +419,10 @@ if __name__ == '__main__':
     parser.add_argument("--dut-user", default='root', action='store')
     parser.add_argument("--dut-host", default=None, action='store')
     parser.add_argument("--testpmd-path", default=None, action='store')
+    parser.add_argument("--q-num", default=2, action='store')
     parser.add_argument("--stf-path", default=None, action='store')
     parser.add_argument("--duration", default=30, action='store')
+    parser.add_argument("--multiplier", default=5, action='store')
     parser.add_argument("--gen-traffic", action='store_true')
     parser.add_argument("--gen-learning",nargs='*',default=[], action='store')
     args = parser.parse_args()
@@ -464,8 +470,7 @@ if __name__ == '__main__':
         gen_traffic(qratio)
         for i in range(len(qratio)):
           qratio[i]['pps']= 0.1 if 1-float(qratio[i]['pps']) == 0 else 1-float(qratio[i]['pps'])
-        gen_traffic(qratio)
+        print(qratio)
+        #gen_traffic(qratio)
     if args.gen_learning != []:
         gen_learning()
-
-
