@@ -218,7 +218,7 @@ def parse_testpmd_log(mpps,pcap_file='',start=0):
                         q[int(y.group().split('=')[1], 16)] = q.get(int(
                         y.group().split('=')[1], 16), [])+[int(
                         ipaddress.IPv4Address(ip_start)+(int(re.search(
-                        'length=\d+', ln).group().split('=')[1])-65))]
+                        'length=\d+', ln).group().split('=')[1])-61))]
     for key in q.keys():
         q[key]=list(set(q[key]))
     print(q)
