@@ -10,6 +10,18 @@
 
 - copy: content="{{ q_ratio }}" dest=/tmp/input.json
 
+- name: Run testpmd In Dettached Tmux Session
+  shell: |
+    tmux new -d -s testpmd
+    tmux send-keys -t testpmd "{{ testpmd_cmd }}" ENTER
+    tmux send-keys -t testpmd "show port info all" ENTER
+  become: True
+  delegate_to: "{{ groups['dpdk_dut'][0] }}"
+
+- name: Pause And Let TestPMD Run
+  pause:
+    seconds: 10
+
 - name: Set Binary Search Command
   set_fact:
     traffic_cmd: >
@@ -28,7 +40,12 @@
     var: perf_output
 - name: debug
   debug:
-    msg: "run {{item[0]}}{{item[1]}}" 
+    msg: "run {{item[0]}}{{item[1]}}"
+
+- name: Kill Tmux Sessions
+  shell: "tmux list-sessions -F '#S' | xargs -n1 tmux kill-session -t"
+  delegate_to: "{{ groups['dpdk_dut'][0] }}"
+
 - name: copy
   vars:
     dst_f: "{{ (stf is defined)|ternary('testpmd','/tmp/testpmd') }}"
