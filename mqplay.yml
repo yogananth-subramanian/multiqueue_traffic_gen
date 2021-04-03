@@ -55,7 +55,7 @@
       loop: "{{openstack_networks}}"
       when:
         - item['provider:segmentation_id']
-        - item['provider:segmentation_id'] in [402, 406]
+        - item['provider:physical_network'] in physical_network_dpdk
 
     - name: Gather Instance Server Ports
       vars:
