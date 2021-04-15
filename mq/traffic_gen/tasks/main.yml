@@ -25,6 +25,8 @@
       {%- endif %}
       --interfaces {{dpdk_nics.split(',')[0]}} {{dpdk_nics.split(',')[1]}}
       --gen-traffic
+      --duration 180
+      --multiplier 1
 - name: Run Binary Search Script
   shell: "{{ traffic_cmd }}"
   register: perf_output
