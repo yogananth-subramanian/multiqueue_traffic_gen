@@ -3,7 +3,7 @@
   gather_facts: False
   pre_tasks:
     - name: Bare include (free-form)
-      include_vars: debug.trexvar.yml
+      include_vars: "{{osp_var}}"
     - name: Require Resource Method
       fail:
         msg: "cloud_resources is not set to correct values: 'create' or 'external', please refer to documentation"
