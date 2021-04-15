@@ -111,6 +111,7 @@ def register():
 def gen_learning_pkt(pps, pcap_file, start_pkt=0):
     if not pcap_file:
         gen_scapy_pkt(pps,'UDP',start_seq=start_pkt)
+        gen_scapy_pkt(pps,'UDP',start_seq=start_pkt,direction=1)
     else:
         sport, dport = parse_pcap(pcap_file)
         gen_scapy_pkt(pps,'TCP',start_seq=start_pkt,src_port=sport,dst_port=dport)
@@ -178,7 +179,7 @@ def trex_cfg():
           devices[i]['vlan']=cfg_dict[0]['port_info'][i]['vlan']
     return devices
 
-def gen_scapy_pkt(maxpps, proto, start_seq=0, src_port=1025, dst_port=32768):
+def gen_scapy_pkt(maxpps, proto, start_seq=0, src_port=1025, dst_port=32768, direction=0):
     devices=trex_cfg()
     ip_start =str(ipaddress.IPv4Address('48.0.0.1')+start_seq)
     size = 65 
@@ -186,17 +187,23 @@ def gen_scapy_pkt(maxpps, proto, start_seq=0, src_port=1025, dst_port=32768):
     iter=0
     for i in range(start_seq, end_seq):
         print(str(ipaddress.IPv4Address(ip_start)+iter))
-        if devices[0].get('vlan'):
-            pkt2 = Ether(src=devices[0]['src_mac'],dst=devices[0]['dest_mac'])/Dot1Q(vlan=int(devices[0]['vlan']))
+        if devices[direction].get('vlan'):
+            pkt2 = Ether(src=devices[direction]['src_mac'],dst=devices[direction]['dest_mac'])/Dot1Q(vlan=int(devices[direction]['vlan']))
         else:
-            pkt2 = Ether(src=devices[0]['src_mac'],dst=devices[0]['dest_mac'])
+            pkt2 = Ether(src=devices[direction]['src_mac'],dst=devices[direction]['dest_mac'])
         pkt1 = pkt2/IP(dst=str(ipaddress.IPv4Address(ip_start)+iter),src="16.0.0.1")
+        dport = dst_port
+        sport = src_port
+        if direction == 1:
+            pkt1 = pkt2/IP(src=str(ipaddress.IPv4Address(ip_start)+iter),dst="16.0.0.1")
+            dport = src_port
+            sport = dst_port
         if proto == 'UDP':
-            pkt = pkt1/UDP(dport=dst_port,sport=src_port)
+            pkt = pkt1/UDP(dport=dport,sport=sport)
         else:
-            pkt = pkt1/TCP(dport=dst_port,sport=src_port)
+            pkt = pkt1/TCP(dport=dport,sport=sport)
         data = (max(0, size - len(pkt))+i) * 'x'
-        sendp(pkt/data, iface=args.interfaces[0])
+        sendp(pkt/data, iface=args.interfaces[direction])
         iter=iter+1
         sleep(0.05)
 
@@ -474,3 +481,6 @@ if __name__ == '__main__':
         #gen_traffic(qratio)
     if args.gen_learning != []:
         gen_learning()
+
+
+

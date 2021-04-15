@@ -1,8 +1,9 @@
 ---
-
 - hosts: undercloud
   gather_facts: False
   pre_tasks:
+    - name: Bare include (free-form)
+      include_vars: debug.trexvar.yml
     - name: Require Resource Method
       fail:
         msg: "cloud_resources is not set to correct values: 'create' or 'external', please refer to documentation"
@@ -252,7 +253,7 @@
     - role: roles/packet_gen/trex/compute_tuning
   tasks:
     - set_fact:
-        multiqueue: 3
+        multiqueue: 5
 
 - hosts: "{{ groups['dpdk_dut'][0] }}"
   vars:
@@ -272,10 +273,10 @@
     dpdk_compiled_dir: '{{ dpdk_root_dir }}/build/app'
     trex_macs: "{{hostvars[groups['undercloud'][0]]['trex_mac']}}"
     testpmd_bin: "{{ dpdk_compiled_dir }}/testpmd"
-    testpmd_lcores: '0,1,2,3'
+    testpmd_lcores: '0,1,2,3,4,5'
     testpmd_mem_channels: 2
     testpmd_socket_mem: 2048
-    testpmd_forward_cores: 3
+    testpmd_forward_cores: 5
     testpmd_rxd: 1024
     testpmd_txd: 1024
     testpmd_rxq: "{{hostvars[dut_compute]['multiqueue']}}"
@@ -311,10 +312,10 @@
     dpdk_compiled_dir: '{{ dpdk_root_dir }}/build/app'
     trex_macs: "{{hostvars[groups['undercloud'][0]]['trex_mac']}}"
     testpmd_bin: "{{ dpdk_compiled_dir }}/testpmd"
-    testpmd_lcores: '0,1,2,3'
+    testpmd_lcores: '0,1,2,3,4,5'
     testpmd_mem_channels: 2
     testpmd_socket_mem: 2048
-    testpmd_forward_cores: 3
+    testpmd_forward_cores: 5
     testpmd_rxd: 1024
     testpmd_txd: 1024
     testpmd_rxq: "{{hostvars[dut_compute]['multiqueue']}}"
@@ -376,10 +377,10 @@
     dpdk_compiled_dir: '{{ dpdk_root_dir }}/build/app'
     trex_macs: "{{hostvars[groups['undercloud'][0]]['trex_mac']}}"
     testpmd_bin: "{{ dpdk_compiled_dir }}/testpmd"
-    testpmd_lcores: '0,1,2,3'
+    testpmd_lcores: '0,1,2,3,4,5'
     testpmd_mem_channels: 2
     testpmd_socket_mem: 2048
-    testpmd_forward_cores: 3
+    testpmd_forward_cores: 5
     testpmd_rxd: 1024
     testpmd_txd: 1024
     testpmd_rxq: "{{hostvars[dut_compute]['multiqueue']}}"
@@ -416,3 +417,11 @@
 
     - role: mq/traffic_gen
 
+- hosts: "{{ dut_compute }}"
+  gather_facts: False
+  become: True
+  pre_tasks:
+    - name: Query PMD load balance status
+      include_role:
+        name: pmd_load_balance
+        tasks_from: status.yml
