@@ -57,8 +57,11 @@
       dest: "/tmp/"
 
   - set_fact:
-      stf_lst: "{{ lookup('fileglob', stf+'*').split(',') }}"
-
+      tmp_lst: "{{ lookup('fileglob', stf+'/*') }}"
+      
+  - set_fact:
+      stf_lst: "{{ tmp_lst.split(',') }}"
+      
   - name: new list
     vars:
       nstf_lst: []
