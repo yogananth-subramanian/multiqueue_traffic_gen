@@ -402,6 +402,37 @@
     - role: ansible-nfv/roles/packet_gen/trex/launch_testpmd
       when: launch_testpmd | default(True)
 
+- hosts: "{{ dut_compute }}"
+  become: true
+  tasks:
+    - set_fact:
+        duration: 180
+
+    - name: Set EMC insertion probability
+      openvswitch_db:
+        state: present
+        table: open_vswitch
+        record: .
+        col: other_config
+        key: pmd-auto-lb-load-threshold
+        value: 80
+
+    - name: Set EMC insertion probability
+      shell: |
+        a="{{((duration/30)+1)|int}}"
+        echo ''>/tmp/rxq
+        for i in $(seq 1 $a);do
+          b=$(date "+%Y-%m-%dT%H-%M-%S")
+          echo TIME: $b|tee -a /tmp/rxq
+          ovs-appctl dpif-netdev/pmd-rxq-show|tee -a /tmp/rxq
+          sleep 30
+        done
+      args:
+        executable: /bin/bash
+      async: "{{duration+90}}"
+      poll: 0
+      register: pmd_rxq
+
 - hosts: "{{groups['trex'][0]}}"
   become: true
   roles:
@@ -416,6 +447,17 @@
         - launch_trex | default(True)
 
     - role: mq/traffic_gen
+
+- hosts: "{{ dut_compute }}"
+  become: true
+  tasks:
+    - name: Set EMC insertion probability
+      async_status:
+        jid: '{{ pmd_rxq.ansible_job_id }}'
+      register: job_result
+      until: job_result.finished
+      retries: 6
+      delay: 60
 
 - hosts: "{{ dut_compute }}"
   gather_facts: False
