@@ -10,9 +10,9 @@
     name: PyYAML
     executable: pip3
 
-- copy:
-    src: "v2.88.tar.gz"
-    dest: "/tmp/" 
+#- copy:
+#    src: "v2.88.tar.gz"
+#    dest: "/tmp/" 
 
 - name: Run t-rex Traffic Generator In Dettached Tmux Session
   vars:
