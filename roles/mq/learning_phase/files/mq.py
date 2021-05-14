@@ -183,7 +183,7 @@ def gen_scapy_pkt(maxpps, proto, start_seq=0, src_port=1025, dst_port=32768, dir
     devices=trex_cfg()
     ip_start =str(ipaddress.IPv4Address('48.0.0.1')+start_seq)
     size = 65 
-    end_seq = maxpps if maxpps-start_seq <= 10 else 10
+    end_seq = maxpps if maxpps-start_seq <= 1000 else 1000
     iter=0
     for i in range(start_seq, end_seq):
         print(str(ipaddress.IPv4Address(ip_start)+iter))
@@ -213,8 +213,8 @@ def parse_testpmd_log(mpps,pcap_file='',start=0):
     src_mac = devices[0]['src_mac']
     q = {}
     ip_start = str(ipaddress.IPv4Address('48.0.0.1')+start)
-    for i in range(start,mpps,10):
-        end=mpps if mpps < i+10 else i+10
+    for i in range(start,mpps,1000):
+        end=mpps if mpps < i+1000 else i+1000
         print('/tmp/testpmd{src}{seq}.log'.format(seq=i,src=pcap_file))
         with open('/tmp/testpmd{src}{seq}.log'.format(seq=i,src=pcap_file), 'r') as tp:
             for ln in tp:
@@ -348,8 +348,8 @@ def main():
         pcap_file = ''
     elif len(stf_file) == 1:
         pcap_file = stf_file[0]
-    for i in range(0,mpps,10):
-        end=mpps if mpps < i+10 else i+10
+    for i in range(0,mpps,1000):
+        end=mpps if mpps < i+1000 else i+1000
         if stf_file != []:
             for pcap_file in stf_file:
                 gen_pkt_copy_log(i,end,stf_path+pcap_file)

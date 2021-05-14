@@ -79,10 +79,10 @@
 - include_tasks: tstpmdlog.yml
   with_nested:
     -  "{{ nstf_lst }}"
-    -  "{{ range(0, fps, 10)|list }}"
+    -  "{{ range(0, fps, 1000)|list }}"
 
 - debug:
     msg: "{{item[0]}}{{item[1] }}"
   with_nested:
     -  ['']
-    -  "{{ range(0, fps, 10)|list }}"
+    -  "{{ range(0, fps, 1000)|list }}"

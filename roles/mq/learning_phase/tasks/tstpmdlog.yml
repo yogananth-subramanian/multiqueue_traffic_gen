@@ -1,7 +1,7 @@
 ---
 - name: debug
   set_fact:
-    max: "{{ (fps < item[1]+10) | ternary(fps, item[1]+10) }}"
+    max: "{{ (fps < item[1]+1000) | ternary(fps, item[1]+1000) }}"
 - set_fact:
     q_str: "{{ (q_str|default(''))+' '+(item|to_json) }}"
   loop: "{{q_ratio}}"

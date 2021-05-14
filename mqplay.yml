@@ -220,8 +220,15 @@
         trex_mac:  "{{trex_mac_lst|join(',')}}"
 
     - set_fact:
+       vlan: "{{vlan|default({})| combine({ item.segmentation_id: item.allocation_pool_start })}}"
+      loop: "{{networks}}"
+      when:
+       - item.tag is not defined
+       - item.physical_network in physical_network_dpdk
+
+    - set_fact:
         nic_vlan_lst:  "{{nic_vlan_lst|default([])+[item[0]|string]}}"
-      loop: "{{nnet_map|dictsort(false, 'value')}}"
+      loop: "{{vlan|dictsort(false, 'value')}}"      
 
     - set_fact:
         nic_vlan:  "{{nic_vlan_lst|join(',')}}"
@@ -268,6 +275,7 @@
         dest: '/tmp/cmdline'
 
 - hosts: "{{ groups['dpdk_dut'][0] }}"
+  become: yes
   vars:
     dpdk_root_dir: "/root/dpdk"
     dpdk_compiled_dir: '{{ dpdk_root_dir }}/build/app'
@@ -296,6 +304,10 @@
         --txq={{ testpmd_txq }} \
         --cmdline-file=/tmp/cmdline 1>/tmp/testpmd.log
   roles:
+    - role: ansible-nfv/roles/tuning/cpu_pinning_huge_pages
+      vars:
+        cpu_pinning_cores: "{{ testpmd_lcores }}"
+
     - role: ansible-nfv/roles/packet_gen/trex/bind_dpdk_nics
       vars:
         discover_dut_macs: True
@@ -352,7 +364,7 @@
       flat: yes
     with_nested:
       -  "{{hostvars[groups['trex'][0]]['nstf_lst'] }}"
-      -  "{{ range(0, fps, 10)|list }}"
+      -  "{{ range(0, fps, 1000)|list }}"
 
 
 - hosts: "{{groups['trex'][0]}}"
@@ -367,7 +379,7 @@
       dest: "/tmp/"
     with_nested:
       -  "{{ nstf_lst }}"
-      -  "{{ range(0, fps, 10)|list }}"
+      -  "{{ range(0, fps, 1000)|list }}"
 
 
 
@@ -414,8 +426,17 @@
         table: open_vswitch
         record: .
         col: other_config
+        key: pmd-auto-lb
+        value: "true"
+
+    - name: Set EMC insertion probability
+      openvswitch_db:
+        state: present
+        table: open_vswitch
+        record: .
+        col: other_config
         key: pmd-auto-lb-load-threshold
-        value: 80
+        value: "{{pmd_load_threshold|default('70')}}"        
 
     - name: Set EMC insertion probability
       shell: |
