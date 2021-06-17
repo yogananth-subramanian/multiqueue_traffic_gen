@@ -98,7 +98,8 @@ class STLImix(object):
           vm[i] = STLScVmRaw([
               STLVmFlowVar(name = "dst_ip", value_list=srclst, op="inc"),
               STLVmWrFlowVar(fv_name='dst_ip', pkt_offset= 'IP.dst'),
-              STLVmFixIpv4(offset = 'IP')
+              STLVmFixIpv4(offset = 'IP'),
+              STLVmFixChecksumHw(l3_offset = "IP", l4_offset = "UDP",l4_type  = CTRexVmInsFixHwCs.L4_TYPE_UDP )
               ])
           print(i)
           print(vm[i])
@@ -225,7 +226,7 @@ def parse_testpmd_log(mpps,pcap_file='',start=0):
                         q[int(y.group().split('=')[1], 16)] = q.get(int(
                         y.group().split('=')[1], 16), [])+[int(
                         ipaddress.IPv4Address(ip_start)+(int(re.search(
-                        'length=\d+', ln).group().split('=')[1])-61))]
+                        'length=\d+', ln).group().split('=')[1])-65))]
     for key in q.keys():
         q[key]=list(set(q[key]))
     print(q)
@@ -293,7 +294,10 @@ def gen_stl(queue_ratio):
         my_ports = [0, 1]
         c.reset(ports=my_ports)
         c.remove_all_streams(my_ports)
-        c.add_streams(register().get_streams(devices[0]['src_mac'],devices[0]['dest_mac'],int(devices[0].get('vlan')),testpmd_json='/tmp/testpmd.json',qratio=queue_ratio), ports = [0])
+        if devices[0].get('vlan'):
+            c.add_streams(register().get_streams(devices[0]['src_mac'],devices[0]['dest_mac'],int(devices[0].get('vlan')),testpmd_json='/tmp/testpmd.json',qratio=queue_ratio), ports = [0])
+        else:
+            c.add_streams(register().get_streams(devices[0]['src_mac'],devices[0]['dest_mac'],testpmd_json='/tmp/testpmd.json',qratio=queue_ratio), ports = [0])
         #5000000
         c.start(ports = [0], mult = "1", duration = int(args.duration))
         c.wait_on_traffic(ports = [0, 1])
